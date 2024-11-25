@@ -137,8 +137,9 @@ df_act = df_act %>%
   ) %>%
   mutate(
     TravType = case_when(
-      Location1 == "Travelling or waiting to travel" & timetype %in% c("unpaid", "paid") ~ "Committed",
-      Location1 == "Travelling or waiting to travel" & timetype %in% c("leisure", "personal") ~ "Uncommitted",
+      Location1 == "Travelling or waiting to travel" & timetype=="unpaid" ~ "TravUnpaid",
+      Location1 == "Travelling or waiting to travel" & timetype=="paid" ~ "TravWork",
+      Location1 == "Travelling or waiting to travel" & timetype %in% c("leisure", "personal") ~ "TravUncommitted",
       .default = "NoTravel"
     )
   ) 
@@ -199,14 +200,14 @@ df_agg = df_agg %>%
 
 
 # Aggregate specific categories of time use
-# 1. Travel (committed vs. uncommitted)
+# 1. Travel (committed vs. TravUncommitted)
 df_trav_wide = df_act %>% 
   left_join(df_indv) %>% 
   group_by(UQNO, PersonUQNO, weekend, TravType) %>% 
   summarise(TimeTrav=sum(Timeper)) %>% 
   pivot_wider(id_cols = PersonUQNO, names_from=TravType, 
               values_from = TimeTrav, unused_fn=first) %>%
-  mutate(across(Committed:Uncommitted, ~replace_na(.,0)))
+  mutate(across(TravWork:TravUnpaid, ~replace_na(.,0)))
 
 # df_cook_wide = df_act %>% 
 #   left_join(df_indv) %>% 
@@ -257,7 +258,7 @@ df_agg_wide = df_agg_wide %>%
   left_join(df_trav_wide) %>% 
   left_join(df_cook_wide) %>%
   left_join(df_wait_wide) %>%
-  mutate(Committed.adj = Committed * med_inc / MonthlyIncomeHH,
+  mutate(TravUnpaid.adj = TravUnpaid * med_inc / MonthlyIncomeHH,
          Unpaid.adj = Timeper_unpaid * med_inc / MonthlyIncomeHH,
          Leisure.adj = Timeper_leisure * med_inc / MonthlyIncomeHH)
 
@@ -267,7 +268,7 @@ df_agg_wide = df_agg_wide %>% filter(Q113Income != "None")
 
 #### 4. Some descriptive plots ####
 focus = c("Timeper_leisure", "Timeper_paid", "Timeper_unpaid", "Timeper_personal",
-          "Committed", "Uncommitted", "CookTime", "WaitTime")
+          "TravUnpaid", "TravUncommitted", "CookTime", "WaitTime")
 # flist = list()
 
 # for (f in focus) {
@@ -292,22 +293,28 @@ df_agg_wide %>% ggplot(aes(x=Timeper_unpaid, y=Timeper_leisure)) +
 df_agg_wide %>% ggplot(aes(x=Timeper_unpaid, y=Timeper_paid)) +
   geom_jitter(size=0.1) + facet_wrap(.~weekend+ Q116Gender) 
 
-df_agg_wide %>% ggplot(aes(Committed)) + 
+df_agg_wide %>% ggplot(aes(TravWork)) + 
   geom_histogram(bins = 70) + facet_wrap(.~weekend+ Q116Gender) +
   lims(x=c(0, 600), y=c(0, 2000))
-df_agg_wide %>% ggplot(aes(Uncommitted)) + 
+df_agg_wide %>% ggplot(aes(TravUnpaid)) + 
   geom_histogram(bins = 70) + facet_wrap(.~weekend+ Q116Gender) +
   lims(x=c(0, 600), y=c(0, 2000))
-df_agg_wide %>% ggplot(aes(x=Q12Cell, y=log(Committed))) + 
+df_agg_wide %>% ggplot(aes(TravUncommitted)) + 
+  geom_histogram(bins = 70) + facet_wrap(.~weekend+ Q116Gender) +
+  lims(x=c(0, 600), y=c(0, 2000))
+df_agg_wide %>% ggplot(aes(TravUncommitted+TravUnpaid)) + 
+  geom_histogram(bins = 70) + facet_wrap(.~weekend+ Q116Gender) +
+  lims(x=c(0, 600), y=c(0, 2000))
+df_agg_wide %>% ggplot(aes(x=Q12Cell, y=log(TravUnpaid))) + 
   geom_boxplot() + facet_wrap(.~ Q17FarWater) 
-df_agg_wide %>% ggplot(aes(x=Q12Car, y=log(Uncommitted))) + 
+df_agg_wide %>% ggplot(aes(x=Q12Car, y=log(TravUncommitted))) + 
   geom_boxplot() + facet_wrap(.~ Q116Gender) 
 
 
-df_agg_wide %>% ggplot(aes(TotTravelTime )) + 
-  geom_histogram(bins = 70) + facet_wrap(.~weekend+ Q116Gender) +
-  lims(x=c(0, 600), y=c(0, 2000))
-df_agg_wide %>% ggplot(aes(Committed.adj)) + 
+# df_agg_wide %>% ggplot(aes(TotTravelTime )) + 
+#   geom_histogram(bins = 70) + facet_wrap(.~weekend+ Q116Gender) +
+#   lims(x=c(0, 600), y=c(0, 2000))
+df_agg_wide %>% ggplot(aes(TravUnpaid.adj)) + 
   geom_histogram(bins = 70) + facet_wrap(.~weekend+ Q116Gender) +
   lims(x=c(0, 600), y=c(0, 2000))
 df_agg_wide %>% ggplot(aes(Timeper_unpaid)) + 
@@ -330,7 +337,7 @@ df_agg_wide %>% ggplot(aes(CookTime)) +
   lims(x=c(0, 500), y=c(0, 2000))
 df_agg_wide %>% ggplot(aes(WaitTime)) + 
   geom_histogram(bins = 70) + facet_wrap(.~weekend+ Q116Gender) +
-  lims(x=c(0, 500), y=c(0, 2000))
+  lims(x=c(0, 300), y=c(0, 500))
 df_agg_wide %>% ggplot(aes(MonthlyIncomeHH)) + geom_histogram(bins = 70)
 df_indv %>% ggplot(aes(MonthlyIncomeIndiv)) + geom_histogram(bins = 70)
 
@@ -369,8 +376,30 @@ tob_mod1 = tobit(Timeper_unpaid ~ weekend + Q23MaritalStatus +
                    Q12DishWasher + Q12Microwave + Q13Cooking +
                    Q11DwellType,
                  data = df_agg_wide %>% filter(Q116Gender=="Female"))
-tob_mod2 = tobit(Unpaid.adj ~ weekend + Q116Gender + Q23MaritalStatus + 
+tob_mod2 = tobit(Unpaid.adj ~ weekend +  Q23MaritalStatus + 
                    MonthlyIncomeIndiv + Geo_Type +
+                   Q19Train + Q19Bus + Q19Taxi + Q110Shop +
+                   Q17FarWater + Q14FarWood +
+                   Q29Child06HH + 
+                   Q31PdWrk +
+                   Q31OwnBusns +
+                   Q12WashingMachine + Q12Refrigerator + Q12Car + Q12Cell +
+                   Q12DishWasher + Q12Microwave + Q13Cooking +
+                   Q11DwellType,
+                 data = df_agg_wide %>% filter(Q116Gender=="Female"))
+tob_mod3 = tobit(Timeper_leisure ~ weekend + Q23MaritalStatus + 
+                   MonthlyIncomeIndiv + Geo_Type +
+                   Q19Train + Q19Bus + Q19Taxi + Q110Shop +
+                   Q17FarWater + Q14FarWood +
+                   Q29Child06HH + 
+                   Q31PdWrk +
+                   Q31OwnBusns +
+                   Q12WashingMachine + Q12Refrigerator + Q12Car + Q12Cell +
+                   Q12DishWasher + Q12Microwave + Q13Cooking +
+                   Q11DwellType,
+                 data = df_agg_wide %>% filter(Q116Gender=="Female"))
+tob_mod4 = tobit(TravWork ~ weekend + Q23MaritalStatus + Q116Gender+
+                   MonthlyIncomeHH + Geo_Type +
                    Q19Train + Q19Bus + Q19Taxi + Q110Shop +
                    Q17FarWater + Q14FarWood +
                    Q29Child06HH + 
@@ -380,28 +409,6 @@ tob_mod2 = tobit(Unpaid.adj ~ weekend + Q116Gender + Q23MaritalStatus +
                    Q12DishWasher + Q12Microwave + Q13Cooking +
                    Q11DwellType,
                  data = df_agg_wide)
-tob_mod3 = tobit(Timeper_leisure ~ weekend + Q116Gender + Q23MaritalStatus + 
-                   MonthlyIncomeIndiv + Geo_Type +
-                   Q19Train + Q19Bus + Q19Taxi + Q110Shop +
-                   Q17FarWater + Q14FarWood +
-                   Q29Child06HH + 
-                   Q31PdWrk +
-                   Q31OwnBusns +
-                   Q12WashingMachine + Q12Refrigerator + Q12Car + Q12Cell +
-                   Q12DishWasher + Q12Microwave + Q13Cooking +
-                   Q11DwellType,
-                 data = df_agg_wide)
-tob_mod4 = tobit(Committed ~ weekend + Q23MaritalStatus + 
-                   MonthlyIncomeIndiv + Geo_Type +
-                   Q19Train + Q19Bus + Q19Taxi + Q110Shop +
-                   Q17FarWater + Q14FarWood +
-                   Q29Child06HH + 
-                   Q31PdWrk +
-                   Q31OwnBusns +
-                   Q12WashingMachine + Q12Refrigerator + Q12Car + Q12Cell +
-                   Q12DishWasher + Q12Microwave + Q13Cooking +
-                   Q11DwellType,
-                 data = df_agg_wide %>% filter(Q116Gender=="Male"))
 tob_mod5 = tobit(CookTime ~ weekend + Q23MaritalStatus + 
                    MonthlyIncomeIndiv + Geo_Type +
                    Q19Train + Q19Bus + Q19Taxi + Q110Shop +
@@ -413,11 +420,31 @@ tob_mod5 = tobit(CookTime ~ weekend + Q23MaritalStatus +
                    Q12DishWasher + Q12Microwave + Q13Cooking +
                    Q11DwellType,
                  data = df_agg_wide %>% filter(Q116Gender=="Female"))
+tob_mod6 = tobit(Timeper_personal ~ weekend + Q23MaritalStatus + Q116Gender +
+                   MonthlyIncomeIndiv + Geo_Type + 
+                   Q19Train + Q19Bus + Q19Taxi + Q110Shop +
+                   Q17FarWater + Q14FarWood +
+                   Q29Child06HH + 
+                   Q31PdWrk +
+                   Q31OwnBusns +
+                   Q12WashingMachine + Q12Refrigerator + Q12Car + Q12Cell +
+                   Q12DishWasher + Q12Microwave + Q13Cooking +
+                   Q11DwellType,
+                 data = df_agg_wide )
+tob_mod7 = tobit(WaitTime ~ weekend + Q23MaritalStatus + Q116Gender +
+                   MonthlyIncomeIndiv + Geo_Type+  
+                   Q31PdWrk +
+                   Q19Train + Q19Bus + Q19Taxi + Q110Shop +
+                   Q17FarWater + Q14FarWood+
+                   Q12WashingMachine + Q12Refrigerator + Q12Car + Q12Cell +
+                   Q12DishWasher + Q12Microwave ,
+                 data = df_agg_wide)
 summary(tob_mod1)
 summary(tob_mod2)
 summary(tob_mod3)
 summary(tob_mod4)
 summary(tob_mod5)
+summary(tob_mod7)
 
 
 #Create a function for pseudoR2 calculation 
